@@ -12,4 +12,5 @@ gem 'timecop'
 gem 'mysql2', :platform => :ruby
 gem 'activerecord-jdbcmysql-adapter', :platform => :jruby
 gem 'pg', :platform => :ruby
+gem 'postgis'
 gem 'activerecord-jdbcpostgresql-adapter', :platform => :jruby

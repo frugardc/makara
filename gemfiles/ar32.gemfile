@@ -11,6 +11,7 @@ gem 'rack'
 gem 'mysql2', :platform => :ruby
 gem 'activerecord-jdbcmysql-adapter', :platform => :jruby
 gem 'pg', :platform => :ruby
+gem 'postgis'
 gem 'activerecord-jdbcpostgresql-adapter', :platform => :jruby
 
 if RUBY_VERSION.to_s =~ /^1.8/
