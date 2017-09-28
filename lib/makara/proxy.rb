@@ -47,14 +47,16 @@ module Makara
       @sticky         = @config_parser.makara_config[:sticky]
       @hijacked       = false
       @error_handler  ||= ::Makara::ErrorHandler.new
+      @skip_sticking  = false
       instantiate_connections
     end
 
-
-    def __getobj__
-      @current_connection
+    def without_sticking
+      @skip_sticking = true
+      yield
+    ensure
+      @skip_sticking = false
     end
-
 
     def hijacked?
       @hijacked
@@ -65,21 +67,19 @@ module Makara
       Makara::Cache.write("makara::#{@master_context}-#{@id}", '1', @ttl) if write_to_cache
     end
 
-    def method_missing(method_name, *args, &block)
-      @master_pool.provide do |con|
-        @current_connection = con
-        super
+    def method_missing(m, *args, &block)
+      target = @master_pool.any
+
+      begin
+        target.respond_to?(m, true) ? target.__send__(m, *args, &block) : super(m, *args, &block)
+      ensure
+        $@.delete_if {|t| %r"\A#{Regexp.quote(__FILE__)}:#{__LINE__-2}:"o =~ t} if $@
       end
-    ensure
-      @current_connection = nil
     end
 
     class_eval <<-RUBY_EVAL, __FILE__, __LINE__ + 1
-      def respond_to#{RUBY_VERSION.to_s =~ /^1.8/ ? nil : '_missing'}?(method_name, include_private = false)
-        return true if super(method_name, false)
-        @master_pool.provide do |con|
-          con.respond_to?(method_name, true)
-        end
+      def respond_to#{RUBY_VERSION.to_s =~ /^1.8/ ? nil : '_missing'}?(m, include_private = false)
+        @master_pool.any.__getobj__.respond_to?(m, true)
       end
     RUBY_EVAL
 
@@ -176,15 +176,20 @@ module Makara
 
 
     def stick_to_master(method_name, args, write_to_cache = true)
-      return unless @sticky
-      return unless should_stick?(method_name, args)
+      # if we're already stuck to master, don't bother doing it again
       return if @master_context == Makara::Context.get_current
+
+      # check to see if we're configured, bypassed, or some custom implementation has input
+      return unless should_stick?(method_name, args)
+
+      # do the sticking
       stick_to_master!(write_to_cache)
     end
 
 
+    # if we are configured to be sticky and we aren't bypassing stickiness
     def should_stick?(method_name, args)
-      true
+      @sticky && !@skip_sticking
     end
 
 

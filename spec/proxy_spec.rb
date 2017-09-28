@@ -2,13 +2,6 @@ require 'spec_helper'
 
 describe Makara::Proxy do
 
-  def change_context
-    Makara::Context.set_previous Makara::Context.get_current
-    Makara::Context.set_current Makara::Context.generate
-  end
-
-
-
   let(:klass){ FakeProxy }
 
 
@@ -87,6 +80,16 @@ describe Makara::Proxy do
       expect(proxy.master_for?('select * from users')).to eq(false)
     end
 
+    it 'should not stick to master if we are in a without_sticking block' do
+      proxy.without_sticking do
+        expect(proxy.master_for?('insert into users values (a,b,c)')).to eq(true)
+        expect(proxy.master_for?('select * from users')).to eq(false)
+      end
+
+      expect(proxy.master_for?('insert into users values (a,b,c)')).to eq(true)
+      expect(proxy.master_for?('select * from users')).to eq(true)
+    end
+
     # if the context changes we should still use master until the previous context is no longer relevant
     it 'should release master if the context changes and enough time passes' do
       expect(proxy.master_for?('insert into users values (a,b,c)')).to eq(true)
@@ -103,7 +106,7 @@ describe Makara::Proxy do
       expect(proxy.master_for?('insert into users values (a,b,c)')).to eq(true)
       expect(proxy.master_for?('select * from users')).to eq(true)
 
-      change_context
+      roll_context
 
       proxy.master_for?('select * from users')
       expect(proxy.master_for?('select * from users')).to eq(true)
@@ -112,7 +115,7 @@ describe Makara::Proxy do
         # cache is expired but context has not changed
         expect(proxy.master_for?('select * from users')).to eq(true)
 
-        change_context
+        roll_context
 
         expect(proxy.master_for?('select * from users')).to eq(false)
       end
@@ -120,8 +123,8 @@ describe Makara::Proxy do
 
     it 'should release master if context changes enough' do
       expect(proxy.master_for?('insert into users values (a,b,c)')).to eq(true)
-      change_context
-      change_context
+      roll_context
+      roll_context
       expect(proxy.master_for?('select * from users')).to eq(false)
     end
 

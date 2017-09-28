@@ -6,12 +6,14 @@
 
 Makara is generic master/slave proxy. It handles the heavy lifting of managing, choosing, blacklisting, and cycling through connections. It comes with an ActiveRecord database adapter implementation.
 
-### Warning: *Makara was recently rewritten. < 0.2.0 configurations will need to be changed to the new format. Makara 0.2.0 is still in its infancy and could use more production testing.*
+#### Warning:
+
+There is a potential performance issue when used alongside certain versions of [newrelic/rpm](https://github.com/newrelic/rpm). Read more and contribute data [here](https://github.com/taskrabbit/makara/issues/59).
 
 ## Installation
 
 ```ruby
-gem 'makara', github: 'taskrabbit/makara', tag: 'v0.2.x'
+gem 'makara', github: 'taskrabbit/makara', tag: 'v0.3.x'
 ```
 
 ## Basic Usage
@@ -82,6 +84,17 @@ write_to_cache = true # or false
 proxy.stick_to_master!(write_to_cache)
 ```
 
+
+### Skipping the Stickiness
+
+If you're using the `sticky: true` configuration and you find yourself in a situation where you need to write information through the proxy but you don't want the context to be stuck to master, you should use a `without_sticking` block:
+
+```ruby
+proxy.without_sticking do
+  # do my stuff that would normally cause the proxy to stick to master
+end
+```
+
 ### Logging
 
 You can set a logger instance to ::Makara::Logging::Logger.logger and Makara will log how it handles errors at the Proxy level.
@@ -110,7 +123,7 @@ Your database.yml should contain the following structure:
 
 ```yml
 production:
-  adapter: 'makara_mysql2'
+  adapter: 'mysql2_makara'
   database: 'MyAppProduction'
   # any other standard AR configurations
 
@@ -121,7 +134,6 @@ production:
     blacklist_duration: 5
     master_ttl: 5
     sticky: true
-    rescue_connection_failures: false
 
     # list your connections with the override values (they're merged into the top-level config)
     # be sure to provide the role if master, role is assumed to be a slave if not provided
@@ -134,7 +146,7 @@ production:
         host: slave2.sql.host
 ```
 
-Let's break this down a little bit. At the top level of your config you have the standard `adapter` choice. Currently the available adapters are listed in [lib/active_record/connection_adapters/](lib/active_record/connection_adapters/). They are in the form of `makara_#{db_type}` where db_type is mysql, postgresql, etc.
+Let's break this down a little bit. At the top level of your config you have the standard `adapter` choice. Currently the available adapters are listed in [lib/active_record/connection_adapters/](lib/active_record/connection_adapters/). They are in the form of `#{db_type}_makara` where db_type is mysql, postgresql, etc.
 
 Following the adapter choice is all the standard configurations (host, port, retry, database, username, password, etc). With all the standard configurations provided, you can now provide the makara subconfig.
 
@@ -142,7 +154,6 @@ The makara subconfig sets up the proxy with a few of its own options, then provi
 * blacklist_duration - the number of seconds a node is blacklisted when a connection failure occurs
 * sticky - if a node should be stuck to once it's used during a specific context
 * master_ttl - how long the master context is persisted. generally, this needs to be longer than any replication lag
-* rescue_connection_failures - should Makara deal with nodes that aren't accessible when the initial connection is instantiated? Nodes will be blacklisted and instantiation will attempt on demand after the blacklisting.
 * connection_error_matchers - array of custom error matchers you want to be handled gracefully by Makara (as in, errors matching these regexes will result in blacklisting the connection as opposed to raising directly).
 
 Connection definitions contain any extra node-specific configurations. If the node should behave as a master you must provide `role: master`. Any previous configurations can be overridden within a specific node's config. Nodes can also contain weights if you'd like to balance usage based on hardware specifications. Optionally, you can provide a name attribute which will be used in sql logging.
@@ -166,23 +177,21 @@ In the previous config the "Big Slave" would receive ~80% of traffic.
 
 ## Custom error matchers:
 
-To enable Makara to catch and handle custom errors gracefully (blacklist the connection instead of raising directly), you must add your custom matchers to the `connection_error_matchers` setting to your config file, for example:
+To enable Makara to catch and handle custom errors gracefully (blacklist the connection instead of raising directly), you must add your custom matchers to the `connection_error_matchers` setting of your config file, for example:
 
 ```yml
 production:
-  adapter: 'makara_mysql2'
+  adapter: 'mysql2_makara'
 
   makara:
     blacklist_duration: 5
-    connections:
-      - role: master
-        host: master.sql.host
     connection_error_matchers:
       - !ruby/regexp '/^ActiveRecord::StatementInvalid: Mysql2::Error: Unknown command:/'
+      - '/Sql Server Has Gone Away/'
       - 'Mysql2::Error: Duplicate entry'
 ```
 
-You can add strings or regexes.  In the case of strings, they will get converted to regexes when finding matches in `ActiveRecord::ConnectionAdapters::MakaraAbstractAdapter::ErrorHandler#custom_error_message?`.
+You can provide strings or regexes.  In the case of strings, if they start with `/` and end with `/` they will be converted to regexes when evaluated. Strings that don't start and end with `/` will get evaluated with standard comparison.
 
 ## Common Problems / Solutions
 

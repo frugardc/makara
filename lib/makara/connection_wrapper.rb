@@ -9,18 +9,13 @@ require 'active_support/core_ext/hash/keys'
 module Makara
   class ConnectionWrapper < ::SimpleDelegator
 
-    def initialize(proxy, config, &block)
-      super(nil)
-
-      @connection_instantiation_block = block
+    def initialize(proxy, connection, config)
+      super(connection)
 
       @config = config.symbolize_keys
       @proxy  = proxy
-    end
 
-    # have we secured a connection yet?
-    def _makara_connected?
-      !!@connection
+      _makara_decorate_connection(connection)
     end
 
     # the weight of the current node
@@ -50,54 +45,23 @@ module Makara
 
     # custom error messages
     def _makara_custom_error_matchers
-      @config[:connection_error_matchers] || []
-    end
-
-    # we delay the instantiation of the underlying connection just in case
-    # it invokes a connect()-like method and errors. Once connected, we keep
-    # a reference to the instantiated connection and release the provided block
-    def __setcon__
-
-      con = @connection_instantiation_block.call
-      _makara_decorate_connection(con)
-
-      # release references
-      @connection_instantiation_block = nil
-
-      @connection = con
-
-    rescue Exception => e
-
-      # if we're configured to rescue connection failures, we raise a custom error
-      # otherwise we blow up
-      if @config[:rescue_connection_failures]
-        raise ::Makara::Errors::InitialConnectionFailure.new(self, e)
-      else
-        raise
-      end
-    end
-
-    # if we've already instantiated a connection, use it. otherwise we need to get connected.
-    def __getobj__
-      @connection || __setcon__
+      @custom_error_matchers ||= (@config[:connection_error_matchers] || [])
     end
 
     # we want to forward all private methods, since we could have kicked out from a private scenario
-    def method_missing(method_name, *args, &block)
-      super
-    rescue NoMethodError => e
+    def method_missing(m, *args, &block)
       target = __getobj__
-      if target.respond_to?(method_name, true)
-        target.__send__(method_name, *args, &block)
-      else
-        raise e
+      begin
+        target.respond_to?(m, true) ? target.__send__(m, *args, &block) : super(m, *args, &block)
+      ensure
+        $@.delete_if {|t| %r"\A#{Regexp.quote(__FILE__)}:#{__LINE__-2}:"o =~ t} if $@
       end
     end
 
 
     class_eval <<-RUBY_EVAL, __FILE__, __LINE__ + 1
-      def respond_to#{RUBY_VERSION.to_s =~ /^1.8/ ? nil : '_missing'}?(method_name, include_private = false)
-        super(method_name, false) || __getobj__.respond_to?(method_name, true)
+      def respond_to#{RUBY_VERSION.to_s =~ /^1.8/ ? nil : '_missing'}?(m, include_private = false)
+        __getobj__.respond_to?(m, true)
       end
     RUBY_EVAL
 
