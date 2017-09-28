@@ -10,9 +10,15 @@ module Makara
 
     IDENTIFIER = '_mkra_ctxt'
 
+    DEFAULT_COOKIE = {
+      :path => '/',
+      :http_only => true,
+      :max_age => '5'
+    }
 
-    def initialize(app)
+    def initialize(app, cookie_options = {})
       @app = app
+      @cookie = DEFAULT_COOKIE.merge(cookie_options)
     end
 
 
@@ -37,7 +43,7 @@ module Makara
     # ignore asset paths
     # consider allowing a filter proc to be provided in an initializer
     def ignore_request?(env)
-      if defined?(Rails)
+      if defined?(Rails) && Rails.try(:application).try(:config).try(:assets).try(:prefix)
         if env['PATH_INFO'].to_s =~ /^#{Rails.application.config.assets.prefix}/
           return true
         end
@@ -94,16 +100,9 @@ module Makara
     # it should always be for the same path, only
     # accessible via http and live for a short amount
     # of time
-    def store_context(status, header)
-
-      cookie_value = {
-        :path => '/',
-        :value => "#{Makara::Context.get_current}--#{status}",
-        :http_only => true,
-        :max_age => '5'
-      }
-
-      Rack::Utils.set_cookie_header!(header, IDENTIFIER, cookie_value)
+    def store_context(status, headers)
+      cookie = @cookie.merge(:value => "#{Makara::Context.get_current}--#{status}")
+      Rack::Utils.set_cookie_header! headers, IDENTIFIER, cookie
     end
   end
 end

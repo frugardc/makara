@@ -1,11 +1,24 @@
+sudo: false
 language: ruby
+cache: bundler
+dist: precise
+
+services:
+  - mysql
+  - postgresql
+
+before_script:
+  - mysql -e 'create database makara_test;'
+  - psql -c 'create database makara_test;' -U postgres
+  - psql -c 'create extension postgis;' -U postgres
 
 rvm:
-  - 1.8.7
-  - 1.9.2
-  - 1.9.3
-  - 2.0.0
-  - 2.1.1
+  - 2.0
+  - 2.1
+  - 2.2
+  - 2.3
+  - 2.4
+  - ruby-head
   - jruby
 
 gemfile:
@@ -15,32 +28,44 @@ gemfile:
   - gemfiles/ar40.gemfile
   - gemfiles/ar41.gemfile
   - gemfiles/ar42.gemfile
+  - gemfiles/ar50.gemfile
+  - gemfiles/ar51.gemfile
+  - gemfiles/ar-head.gemfile
 
-sudo: false
-
-services:
-  - mysql
-  - postgresql
-
-before_script:
-  - mysql -e 'create database makara_test;'
-  - psql -c 'create database makara_test;' -U postgres
-
-before_install:
-  - gem update --system 2.1.11
-  - gem --version
+env:
+  global:
+    - "JRUBY_OPTS='--dev -J-Xmx1024M'"
 
 matrix:
   exclude:
-    - rvm: 1.8.7
-      gemfile: gemfiles/ar40.gemfile
-    - rvm: 1.9.2
-      gemfile: gemfiles/ar40.gemfile
-    - rvm: 1.8.7
-      gemfile: gemfiles/ar41.gemfile
-    - rvm: 1.9.2
-      gemfile: gemfiles/ar41.gemfile
-    - rvm: 1.8.7
-      gemfile: gemfiles/ar42.gemfile
-    - rvm: 1.9.2
-      gemfile: gemfiles/ar42.gemfile
+    - gemfile: gemfiles/ar30.gemfile
+      rvm: 2.2
+    - gemfile: gemfiles/ar30.gemfile
+      rvm: 2.3
+    - gemfile: gemfiles/ar30.gemfile
+      rvm: 2.4
+    - gemfile: gemfiles/ar30.gemfile
+      rvm: ruby-head
+    - gemfile: gemfiles/ar50.gemfile
+      rvm: 2.0
+    - gemfile: gemfiles/ar50.gemfile
+      rvm: 2.1
+    - gemfile: gemfiles/ar50.gemfile
+      rvm: 2.2
+    - gemfile: gemfiles/ar51.gemfile
+      rvm: 2.0
+    - gemfile: gemfiles/ar51.gemfile
+      rvm: 2.1
+    - gemfile: gemfiles/ar51.gemfile
+      rvm: 2.2
+    - gemfile: gemfiles/ar-head.gemfile
+      rvm: 2.0
+    - gemfile: gemfiles/ar-head.gemfile
+      rvm: 2.1
+    - gemfile: gemfiles/ar-head.gemfile
+      rvm: 2.2
+  allow_failures:
+    - gemfile: gemfiles/ar-head.gemfile
+    - rvm: ruby-head
+    - rvm: jruby
+  fast_finish: true

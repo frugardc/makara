@@ -16,11 +16,19 @@ module ActiveRecord
 
 
         CONNECTION_MATCHERS = [
-          /(closed|lost|no|terminating|terminated)\s?([^\s]+)?\sconnection/i,
-          /gone away/i,
-          /connection[^:]+refused/i,
-          /could not connect/i,
-          /connection[^:]+closed/i
+          /(closed|lost|no|terminating|terminated)\s?([^\s]+)?\sconnection/,
+          /gone away/,
+          /connection[^:]+refused/,
+          /could not connect/,
+          /can\'t connect/,
+          /cannot connect/,
+          /connection[^:]+closed/,
+          /can\'t get socket descriptor/,
+          /connection to [a-z0-9.]+:[0-9]+ refused/,
+          /timeout expired/,
+          /could not translate host name/,
+          /timeout waiting for a response/,
+          /the database system is (starting|shutting)/
         ].map(&:freeze).freeze
 
 
@@ -97,10 +105,10 @@ module ActiveRecord
       end
 
 
-      hijack_method :execute, :select_rows, :exec_query
-      send_to_all :connect, :disconnect!, :reconnect!, :verify!, :clear_cache!, :reset!
+      hijack_method :execute, :select_rows, :exec_query, :transaction
+      send_to_all :connect, :reconnect!, :verify!, :clear_cache!, :reset!
 
-      SQL_MASTER_MATCHERS           = [/\A\s*select.+for update\Z/i, /select.+lock in share mode\Z/i].map(&:freeze).freeze
+      SQL_MASTER_MATCHERS           = [/\A\s*select.+for update\Z/i, /select.+lock in share mode\Z/i, /\A\s*select.+(nextval|currval|lastval)\(/i].map(&:freeze).freeze
       SQL_SLAVE_MATCHERS            = [/\A\s*select\s/i].map(&:freeze).freeze
       SQL_ALL_MATCHERS              = [/\A\s*set\s/i].map(&:freeze).freeze
       SQL_SKIP_STICKINESS_MATCHERS  = [/\A\s*show\s([\w]+\s)?(field|table|database|schema|view|index)(es|s)?/i, /\A\s*(set|describe|explain|pragma)\s/i].map(&:freeze).freeze
@@ -135,19 +143,14 @@ module ActiveRecord
       protected
 
 
-      def appropriate_connection(method_name, args)
+      def appropriate_connection(method_name, args, &block)
         if needed_by_all?(method_name, args)
 
-          # slave pool must run first.
-          @slave_pool.provide_each do |con|
+          handling_an_all_execution(method_name) do
             hijacked do
-              yield con
-            end
-          end
-
-          @master_pool.provide_each do |con|
-            hijacked do
-              yield con
+              # slave pool must run first.
+              @slave_pool.send_to_all(nil, &block)  # just yields to each con
+              @master_pool.send_to_all(nil, &block) # just yields to each con
             end
           end
 
@@ -162,28 +165,38 @@ module ActiveRecord
 
 
       def should_stick?(method_name, args)
-        sql = args.first.to_s
+        sql = coerce_query_to_sql_string(args.first)
         return false if sql_skip_stickiness_matchers.any?{|m| sql =~ m }
         super
       end
 
 
       def needed_by_all?(method_name, args)
-        sql = args.first.to_s
+        sql = coerce_query_to_sql_string(args.first)
         return true if sql_all_matchers.any?{|m| sql =~ m }
         false
       end
 
 
       def needs_master?(method_name, args)
-        sql = args.first.to_s
+        sql = coerce_query_to_sql_string(args.first)
         return true if sql_master_matchers.any?{|m| sql =~ m }
         return false if sql_slave_matchers.any?{|m| sql =~ m }
         true
       end
 
 
+      def coerce_query_to_sql_string(sql_or_arel)
+        if sql_or_arel.respond_to?(:to_sql)
+          sql_or_arel.to_sql
+        else
+          sql_or_arel.to_s
+        end
+      end
+
+
       def connection_for(config)
+        config = Makara::ConfigParser.merge_and_resolve_default_url_config(config)
         active_record_connection_for(config)
       end
 

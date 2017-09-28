@@ -14,23 +14,24 @@ rescue LoadError
 end
 
 RSpec.configure do |config|
-  config.treat_symbols_as_metadata_keys_with_true_values = true
   config.run_all_when_everything_filtered = true
   config.filter_run :focus
 
   config.order = 'random'
 
+  require "#{File.dirname(__FILE__)}/support/helpers"
   require "#{File.dirname(__FILE__)}/support/proxy_extensions"
   require "#{File.dirname(__FILE__)}/support/pool_extensions"
-  require "#{File.dirname(__FILE__)}/support/configurator"
   require "#{File.dirname(__FILE__)}/support/mock_objects"
+  require "#{File.dirname(__FILE__)}/support/deep_dup"
 
-  config.include Configurator
+  config.include SpecHelpers
 
   config.before :each do
     Makara::Cache.store = :memory
     change_context
-    allow_any_instance_of(Makara::Pool).to receive(:should_shuffle?){ false }
+    allow_any_instance_of(Makara::Strategies::RoundRobin).to receive(:should_shuffle?){ false }
+    RSpec::Mocks.space.proxy_for(ActiveRecord::Base).reset # make sure not stubbed in some way
   end
 
   def change_context

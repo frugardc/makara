@@ -8,12 +8,18 @@ Makara is generic master/slave proxy. It handles the heavy lifting of managing, 
 
 #### Warning:
 
-There is a potential performance issue when used alongside certain versions of [newrelic/rpm](https://github.com/newrelic/rpm). Read more and contribute data [here](https://github.com/taskrabbit/makara/issues/59).
+There is a potential performance issue when used alongside certain versions of
+[newrelic/rpm](https://github.com/newrelic/rpm), [Issue #59](https://github.com/taskrabbit/makara/issues/59).
+
+> Any newrelic_rpm `< 3.11.2` and `>= 3.7.2` will have the regression.
+> I'd recommend upgrading newrelic_rpm to avoid the problem.
 
 ## Installation
 
+Use the current version of the gem from [rubygems](https://rubygems.org/gems/makara) in your `Gemfile`.
+
 ```ruby
-gem 'makara', github: 'taskrabbit/makara', tag: 'v0.3.x'
+gem 'makara'
 ```
 
 ## Basic Usage
@@ -74,6 +80,9 @@ ctx = Makara::Context.generate # or any unique sha
 Makara::Context.set_current ctx
 ```
 
+A context is local to the curent thread of execution. This will allow you to stick to master safely in a single thread
+in systems such as sidekiq, for instance.
+
 
 ### Forcing Master
 
@@ -133,6 +142,7 @@ production:
     # the following are default values
     blacklist_duration: 5
     master_ttl: 5
+    master_strategy: round_robin
     sticky: true
 
     # list your connections with the override values (they're merged into the top-level config)
@@ -152,8 +162,10 @@ Following the adapter choice is all the standard configurations (host, port, ret
 
 The makara subconfig sets up the proxy with a few of its own options, then provides the connection list. The makara options are:
 * blacklist_duration - the number of seconds a node is blacklisted when a connection failure occurs
+* disable_blacklist - do not blacklist node at any error, useful in case of one master
 * sticky - if a node should be stuck to once it's used during a specific context
 * master_ttl - how long the master context is persisted. generally, this needs to be longer than any replication lag
+* master_strategy - use a different strategy for picking the "current" node: `failover` will try to keep the same one until it is blacklisted. The default is `round_robin` which will cycle through available ones.
 * connection_error_matchers - array of custom error matchers you want to be handled gracefully by Makara (as in, errors matching these regexes will result in blacklisting the connection as opposed to raising directly).
 
 Connection definitions contain any extra node-specific configurations. If the node should behave as a master you must provide `role: master`. Any previous configurations can be overridden within a specific node's config. Nodes can also contain weights if you'd like to balance usage based on hardware specifications. Optionally, you can provide a name attribute which will be used in sql logging.
@@ -174,6 +186,55 @@ connections:
 ```
 
 In the previous config the "Big Slave" would receive ~80% of traffic.
+
+#### DATABASE_URL
+
+Connections may specify a `url` parameter in place of host, username, password, etc.
+
+```yml
+connections:
+  - role: master
+    blacklist_duration: 0
+    url: 'mysql2://db_username:db_password@localhost:3306/db_name'
+```
+
+We recommend, if using environmental variables, to interpolate them via ERb.
+
+```yml
+connections:
+  - role: master
+    blacklist_duration: 0
+    url: <%= ENV['DATABASE_URL_MASTER'] %>
+  - role: slave
+    url: <%= ENV['DATABASE_URL_SLAVE'] %>
+```
+
+**Important**: *Do NOT use `ENV['DATABASE_URL']`*, as it inteferes with the the database configuration
+initialization and may cause Makara not to complete the configuration.  For the moment, it is easier
+to use a different ENV variable than to hook into the database initialization in all the supported
+Rails.
+
+For more information on url parsing, as used in
+[ConfigParser](https://github.com/taskrabbit/makara/blob/master/lib/makara/config_parser.rb), see:
+
+- 3.0
+    [ActiveRecord::Base::ConnectionSpecification.new](https://github.com/rails/rails/blob/3-0-stable/activerecord/lib/active_record/connection_adapters/abstract/connection_specification.rb#L3-L7)
+- 3.0
+    [ActiveRecord::Base::ConnectionSpecification.new](https://github.com/rails/rails/blob/3-1-stable/activerecord/lib/active_record/connection_adapters/abstract/connection_specification.rb#L3-L7)
+- 3.2
+  [ActiveRecord::Base::ConnectionSpecification::Resolver.send(:connection_url_to_hash, url_config[:url])](https://github.com/rails/rails/blob/3-2-stable/activerecord/lib/active_record/connection_adapters/abstract/connection_specification.rb#L60-L77)
+- 4.0
+ [ActiveRecord::ConnectionAdapters::ConnectionSpecification::Resolver.send(:connection_url_to_hash, url_config[:url])](https://github.com/rails/rails/blob/4-0-stable/activerecord/lib/active_record/connection_adapters/connection_specification.rb#L68-L92)
+  - [ActiveRecord::ConnectionHandling::MergeAndResolveDefaultUrlConfig](https://github.com/rails/rails/blob/4-0-stable/activerecord/lib/active_record/connection_handling.rb)
+- 4.1
+ [ActiveRecord::ConnectionAdapters::ConnectionSpecification::ConnectionUrlResolver.new(url).to_hash](https://github.com/rails/rails/blob/4-1-stable/activerecord/lib/active_record/connection_adapters/connection_specification.rb#L17-L121)
+  - ActiveRecord::ConnectionHandling::MergeAndResolveDefaultUrlConfig.new(url_config).resolve
+- 4.2
+ [ActiveRecord::ConnectionAdapters::ConnectionSpecification::ConnectionUrlResolver.new(url).to_hash](https://github.com/rails/rails/blob/4-2-stable/activerecord/lib/active_record/connection_handling.rb#L60-L81)
+- master
+ [ActiveRecord::ConnectionAdapters::ConnectionSpecification::ConnectionUrlResolver.new(url).to_hash](https://github.com/rails/rails/blob/97b980b4e61aea3cee429bdee4b2eae2329905cd/activerecord/lib/active_record/connection_handling.rb#L60-L81)
+
+
 
 ## Custom error matchers:
 

@@ -13,6 +13,18 @@ class FakeConnection < Struct.new(:config)
   def query(content)
     []
   end
+
+  def active?
+    true
+  end
+
+  def disconnect!
+    true
+  end
+
+  def something
+    (config || {})[:something]
+  end
 end
 
 class FakeDatabaseAdapter < Struct.new(:config)
@@ -27,6 +39,10 @@ class FakeDatabaseAdapter < Struct.new(:config)
 
   def select_rows(sql, name = nil)
     []
+  end
+
+  def active?
+    true
   end
 
 end
